@@ -23,16 +23,19 @@ Backend for the **ce·ce** snooker app. Single backend for iOS / Android / Web c
 
 Run from the repo root (Turborepo fans out to all packages):
 
-| Command          | What it does                                 |
-| ---------------- | -------------------------------------------- |
-| `pnpm install`   | Install all workspace deps                   |
-| `pnpm build`     | Build every package (`apps/*`, `packages/*`) |
-| `pnpm test`      | Run unit tests (vitest)                      |
-| `pnpm lint`      | ESLint across the monorepo                   |
-| `pnpm typecheck` | TypeScript `--noEmit` per package            |
-| `pnpm format`    | Prettier write                               |
+| Command          | What it does                                  |
+| ---------------- | --------------------------------------------- |
+| `pnpm install`   | Install all workspace deps                    |
+| `pnpm dev`       | Run the API in watch mode (builds deps first) |
+| `pnpm start`     | Build, then run the API once                  |
+| `pnpm build`     | Build every package (`apps/*`, `packages/*`)  |
+| `pnpm test`      | Run unit tests (vitest)                       |
+| `pnpm lint`      | ESLint across the monorepo                    |
+| `pnpm typecheck` | TypeScript `--noEmit` per package             |
+| `pnpm format`    | Prettier write                                |
 
-Run the API locally: `pnpm --filter @cece/api dev` → health check at `GET http://localhost:3000/v1/health`.
+Run the API locally: `pnpm dev` (watch) or `pnpm start` (build + run) → health check at
+`GET http://localhost:3000/v1/health`. Override the port with `PORT=3001 pnpm start`.
 
 ## Process
 

@@ -25,7 +25,8 @@ pnpm test           # run tests
 pnpm lint           # lint
 pnpm typecheck      # type-check
 
-pnpm --filter @cece/api dev   # run the API → GET http://localhost:3000/v1/health
+pnpm dev            # run the API in watch mode → GET http://localhost:3000/v1/health
+pnpm start          # build, then run the API once
 ```
 
 ## Development
