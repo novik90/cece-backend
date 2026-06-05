@@ -1,7 +1,15 @@
 /**
- * @cece/contract — single source of truth for API types and zod schemas.
+ * @cece/contract — single source of truth for the v1 API.
  *
- * Phase 1 (Auth + Users + Matches) types/schemas are added in a dedicated task;
- * this is the package skeleton.
+ * Zod schemas are authoritative; TypeScript types are derived via `z.infer`.
+ * The API validates I/O against these schemas and clients follow them.
  */
 export const CONTRACT_VERSION = 'v1' as const;
+
+export * from './error';
+export * from './primitives';
+export * from './user';
+export * from './match';
+export * from './auth';
+export * from './users';
+export * from './matches';
