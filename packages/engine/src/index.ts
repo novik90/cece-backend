@@ -1,7 +1,11 @@
 /**
  * @cece/engine — server-authoritative snooker engine.
  *
- * Real-time scoring (pot/foul/endBreak/endFrame/switchScorer) lands in Phase 2;
- * this is the package skeleton.
+ * Phase 2 (hybrid): tracks score, frame, striker and break, and applies the
+ * in-frame actions `pot` / `foul` / `endVisit`. Frame/match completion, concede
+ * and undo are orchestrated at the match level.
  */
 export const ENGINE_VERSION = '0.0.0' as const;
+
+export { EngineError } from './error';
+export { initialFrameState, applyScoringAction, type FrameAction } from './frame';
