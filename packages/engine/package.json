@@ -10,5 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@cece/contract": "workspace:*"
   }
 }
