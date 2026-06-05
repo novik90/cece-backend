@@ -90,10 +90,8 @@ describe('matchLiveStateSchema', () => {
     expect(matchLiveStateSchema.safeParse(liveState).success).toBe(true);
   });
   it('parses a completed match without a frame', () => {
-    const { frame: _omit, ...rest } = liveState;
-    expect(
-      matchLiveStateSchema.safeParse({ ...rest, status: 'completed', framesWon: [3, 1] }).success,
-    ).toBe(true);
+    const completed = { ...liveState, status: 'completed', framesWon: [3, 1], frame: undefined };
+    expect(matchLiveStateSchema.safeParse(completed).success).toBe(true);
   });
 });
 
