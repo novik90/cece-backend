@@ -13,6 +13,12 @@ export const errorCodeSchema = z.enum([
   'user_not_found',
   'match_not_found',
   'not_participant',
+  // Phase 2 — real-time scoring
+  'match_not_live',
+  'invalid_action',
+  'self_scoring_forbidden',
+  'nothing_to_undo',
+  'version_conflict',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
