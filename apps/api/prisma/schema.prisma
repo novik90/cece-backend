@@ -1,5 +1,6 @@
-// ce·ce — Phase 1 schema (Auth + Users + Matches, no real-time scoring).
-// See Obsidian: cece app/cece-backend/Контракты v1 — Auth, Users, Matches.
+// ce·ce schema.
+// Phase 1 — Auth + Users + Matches: Obsidian `Контракты v1 — Auth, Users, Matches`.
+// Phase 2 — real-time scoring (frames + event log): `Контракты v2 — Real-time скоринг`.
 
 generator client {
   provider = "prisma-client-js"
@@ -16,6 +17,11 @@ enum MatchStatus {
   completed
 }
 
+enum FrameStatus {
+  in_progress
+  completed
+}
+
 model User {
   id           String   @id @default(uuid())
   handle       String   @unique
@@ -27,6 +33,7 @@ model User {
   ownedMatches   Match[]            @relation("MatchOwner")
   activeScoring  Match[]            @relation("ActiveScorer")
   participations MatchParticipant[]
+  authoredEvents MatchEvent[]       @relation("EventAuthor")
 
   @@map("users")
 }
@@ -41,7 +48,10 @@ model Match {
   framesWonB         Int         @default(0) @map("frames_won_b")
   // Winning participant referenced by slot (0/1); null until completed.
   winnerSlot         Int?        @map("winner_slot")
-  // Phase 2: whose phone is currently entering the score.
+  // Phase 2 scoring settings.
+  selfScoringDisabled Boolean    @default(false) @map("self_scoring_disabled")
+  firstBreakerSlot    Int        @default(0) @map("first_breaker_slot")
+  // Reserved/unused: Phase 2 uses a lock-free scoring model (no active scorer).
   activeScorerUserId String?     @map("active_scorer_user_id")
   createdAt          DateTime    @default(now()) @map("created_at")
   completedAt        DateTime?   @map("completed_at")
@@ -49,6 +59,8 @@ model Match {
   owner        User               @relation("MatchOwner", fields: [ownerId], references: [id])
   activeScorer User?              @relation("ActiveScorer", fields: [activeScorerUserId], references: [id])
   participants MatchParticipant[]
+  frames       Frame[]
+  events       MatchEvent[]
 
   @@index([ownerId])
   @@map("matches")
@@ -67,4 +79,47 @@ model MatchParticipant {
   @@id([matchId, slot])
   @@index([userId])
   @@map("match_participants")
+}
+
+// One frame of a match. At most one `in_progress` per match (kept by the engine).
+model Frame {
+  id          String      @id @default(uuid())
+  matchId     String      @map("match_id")
+  frameNumber Int         @map("frame_number")
+  breakerSlot Int         @map("breaker_slot")
+  status      FrameStatus @default(in_progress)
+  winnerSlot  Int?        @map("winner_slot")
+  scoreA      Int         @default(0) @map("score_a")
+  scoreB      Int         @default(0) @map("score_b")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  completedAt DateTime?   @map("completed_at")
+
+  match  Match        @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  events MatchEvent[]
+
+  @@unique([matchId, frameNumber])
+  @@index([matchId])
+  @@map("frames")
+}
+
+// Append-only scoring log; `seq` is monotonic per match. Source of truth that
+// the live state is folded from; `undo` reverts the last event.
+model MatchEvent {
+  id        String   @id @default(uuid())
+  matchId   String   @map("match_id")
+  frameId   String?  @map("frame_id")
+  seq       Int
+  type      String
+  payload   Json
+  byUserId  String?  @map("by_user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  match Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  frame Frame? @relation(fields: [frameId], references: [id], onDelete: SetNull)
+  by    User?  @relation("EventAuthor", fields: [byUserId], references: [id], onDelete: SetNull)
+
+  @@unique([matchId, seq])
+  @@index([matchId])
+  @@index([frameId])
+  @@map("match_events")
 }
