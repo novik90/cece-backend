@@ -14,6 +14,11 @@
     "test": "turbo run test",
     "dev": "turbo run dev",
     "start": "turbo run build --filter=@cece/api && pnpm --filter @cece/api start",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @cece/api db:migrate",
+    "db:generate": "pnpm --filter @cece/api db:generate",
+    "db:studio": "pnpm --filter @cece/api db:studio",
     "format": "prettier --write \"**/*.{ts,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,js,json,md}\""
   },
@@ -25,5 +30,13 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",
     "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma"
+    ]
   }
 }

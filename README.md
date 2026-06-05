@@ -29,6 +29,17 @@ pnpm dev            # run the API in watch mode → GET http://localhost:3000/v1
 pnpm start          # build, then run the API once
 ```
 
+### Database (local Postgres via Docker)
+
+Requires **Docker**. Later we point `DATABASE_URL` at a managed Postgres — no code changes.
+
+```bash
+cp apps/api/.env.example apps/api/.env   # DATABASE_URL → the compose DB
+pnpm db:up          # start Postgres (docker compose)
+pnpm db:migrate     # apply migrations
+pnpm db:studio      # browse data (optional)
+```
+
 ## Development
 
 Conventions and the contributor guide for AI agents live in [`CLAUDE.md`](./CLAUDE.md).
