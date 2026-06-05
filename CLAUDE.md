@@ -11,13 +11,14 @@ Backend for the **ce·ce** snooker app. Single backend for iOS / Android / Web c
 
 ## Layout (monorepo, pnpm + Turborepo)
 
-- `apps/api` — NestJS server (HTTP, later Socket.IO).
+- `apps/api` — NestJS server (HTTP, later Socket.IO). Owns DB access via Prisma (`apps/api/prisma`).
 - `packages/contract` — shared types + zod schemas.
 - `packages/engine` — snooker engine (Phase 2).
 
 ## Requirements
 
 - **Node 20** (see `.nvmrc`). **pnpm 9** (`corepack enable`, or run via `corepack pnpm@9.15.0 …`).
+- **Docker** — for the local Postgres (`docker compose`). Managed Postgres later (just swap `DATABASE_URL`).
 
 ## Commands
 
@@ -36,6 +37,27 @@ Run from the repo root (Turborepo fans out to all packages):
 
 Run the API locally: `pnpm dev` (watch) or `pnpm start` (build + run) → health check at
 `GET http://localhost:3000/v1/health`. Override the port with `PORT=3001 pnpm start`.
+
+### Database (local Postgres via Docker)
+
+| Command            | What it does                                           |
+| ------------------ | ------------------------------------------------------ |
+| `pnpm db:up`       | Start local Postgres (`docker compose up -d`)          |
+| `pnpm db:down`     | Stop it (data persists in the `cece_pgdata` volume)    |
+| `pnpm db:migrate`  | Apply/create migrations (`prisma migrate dev`)         |
+| `pnpm db:generate` | Regenerate Prisma Client (also runs on `pnpm install`) |
+| `pnpm db:studio`   | Open Prisma Studio                                     |
+
+First-time setup:
+
+```bash
+cp apps/api/.env.example apps/api/.env   # DATABASE_URL points at the compose DB
+pnpm db:up
+pnpm db:migrate
+pnpm dev
+```
+
+Schema lives in `apps/api/prisma/schema.prisma`; migrations in `apps/api/prisma/migrations`.
 
 ## Process
 

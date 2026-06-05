@@ -1,0 +1,23 @@
+# Local development database. Bring up with `pnpm db:up`.
+# Data persists in the named volume across restarts.
+services:
+  db:
+    image: postgres:16
+    container_name: cece-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cece
+      POSTGRES_PASSWORD: cece
+      POSTGRES_DB: cece
+    ports:
+      - '5432:5432'
+    volumes:
+      - cece_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cece -d cece']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  cece_pgdata:
