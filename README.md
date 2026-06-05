@@ -5,7 +5,7 @@ Server-authoritative, contract-first, thin online-only clients.
 
 ## Stack
 
-TypeScript / Node 20 · NestJS · PostgreSQL + Prisma (added in a later task) · Socket.IO (Phase 2).
+TypeScript / Node 20 · NestJS · PostgreSQL + Prisma · Socket.IO (Phase 2).
 Monorepo with pnpm + Turborepo.
 
 ```
@@ -34,11 +34,36 @@ pnpm start          # build, then run the API once
 Requires **Docker**. Later we point `DATABASE_URL` at a managed Postgres — no code changes.
 
 ```bash
-cp apps/api/.env.example apps/api/.env   # DATABASE_URL → the compose DB
+cp apps/api/.env.example apps/api/.env   # DATABASE_URL → the compose DB; JWT_SECRET
 pnpm db:up          # start Postgres (docker compose)
 pnpm db:migrate     # apply migrations
 pnpm db:studio      # browse data (optional)
 ```
+
+## API (Phase 1)
+
+Base `/v1`, JSON, `Authorization: Bearer <jwt>` where noted (🔒), errors as `{ "error": { "code", "message" } }`.
+
+| Method & path              | Auth | Purpose                                          |
+| -------------------------- | :--: | ------------------------------------------------ |
+| `GET /v1/health`           |      | Liveness check                                   |
+| `POST /v1/auth/register`   |      | Register, returns JWT + user                     |
+| `POST /v1/auth/login`      |      | Login, returns JWT + user                        |
+| `GET /v1/me`               |  🔒  | Current user profile                             |
+| `GET /v1/users?handle=…`   |  🔒  | Prefix search by handle                          |
+| `POST /v1/matches`         |  🔒  | Create a match (vs registered user or guest)     |
+| `GET /v1/matches?status=…` |  🔒  | List my matches (`all` \| `live` \| `completed`) |
+| `GET /v1/matches/:id`      |  🔒  | Get one match (participants only)                |
+
+Types and zod schemas are the source of truth in [`packages/contract`](./packages/contract).
+Full request/response reference (fields, examples, error codes) lives in Obsidian:
+`cece app/cece-backend/Справочник API v1 — ручки (запрос ⇄ ответ)`.
+
+## Testing
+
+`pnpm test` runs vitest across the monorepo. `apps/api` has **unit specs** (`*.spec.ts`,
+mocked Prisma) and **e2e/contract specs** (`*.e2e.spec.ts`) that boot the real Nest app
+over an in-memory Prisma fake and drive it with supertest — no Postgres required.
 
 ## Development
 

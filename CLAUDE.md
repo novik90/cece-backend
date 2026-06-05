@@ -30,7 +30,7 @@ Run from the repo root (Turborepo fans out to all packages):
 | `pnpm dev`       | Run the API in watch mode (builds deps first) |
 | `pnpm start`     | Build, then run the API once                  |
 | `pnpm build`     | Build every package (`apps/*`, `packages/*`)  |
-| `pnpm test`      | Run unit tests (vitest)                       |
+| `pnpm test`      | Run unit + e2e tests (vitest)                 |
 | `pnpm lint`      | ESLint across the monorepo                    |
 | `pnpm typecheck` | TypeScript `--noEmit` per package             |
 | `pnpm format`    | Prettier write                                |
@@ -51,13 +51,22 @@ Run the API locally: `pnpm dev` (watch) or `pnpm start` (build + run) → health
 First-time setup:
 
 ```bash
-cp apps/api/.env.example apps/api/.env   # DATABASE_URL points at the compose DB
+cp apps/api/.env.example apps/api/.env   # DATABASE_URL (compose DB) + JWT_SECRET
 pnpm db:up
 pnpm db:migrate
 pnpm dev
 ```
 
 Schema lives in `apps/api/prisma/schema.prisma`; migrations in `apps/api/prisma/migrations`.
+
+## Testing
+
+`pnpm test` runs vitest across the monorepo. In `apps/api`:
+
+- **Unit specs** (`*.spec.ts`, colocated) test services in isolation with a mocked Prisma.
+- **E2E / contract specs** (`*.e2e.spec.ts`) boot the real Nest app over an in-memory Prisma fake (`src/test-support/`) and drive it with supertest — no Postgres needed. They assert the HTTP contract: status codes, the `{ error }` envelope, the JWT guard, and authz.
+
+`apps/api/vitest.config.ts` transpiles with SWC so Nest's decorator metadata works under vitest. E2E specs and `src/test-support/` are excluded from the production build (`tsconfig.build.json`).
 
 ## Process
 
@@ -67,6 +76,6 @@ Board: GitHub Projects «cece» (owner `novik90`, project #1).
 
 ## Roadmap
 
-- **Phase 1:** Auth + Users + basic Matches (CRUD, no real-time). Contract: Obsidian `cece app/cece-backend/Контракты v1`.
-- **Phase 2:** real-time scoring (engine + WebSocket + active-scorer queue).
+- **Phase 1 ✅ done:** Auth + Users + basic Matches (CRUD, no real-time). Contract: Obsidian `cece app/cece-backend/Контракты v1`; endpoint reference: `… Справочник API v1 — ручки`.
+- **Phase 2 (next):** real-time scoring (engine + WebSocket + active-scorer queue).
 - **Phase 3:** tournaments, invites, friends. **Phase 4:** Android + Web clients.
