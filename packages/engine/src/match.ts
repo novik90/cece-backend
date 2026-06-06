@@ -53,7 +53,32 @@ export function reduceMatch(state: MatchLiveState, action: FrameAction): MatchLi
     version: state.version + 1,
   };
 
-  return isTableCleared(frame) ? settleFrame(next, frame) : next;
+  if (!isTableCleared(frame)) return next;
+  const [a, b] = frame.scores;
+  // A dead-heat at the clearance re-spots the black (full respotted-black rules deferred).
+  if (a === b) return { ...next, frame: { ...frame, colorOn: 'black', pointsRemaining: 7 } };
+  return settleFrame(next, frame, a > b ? 0 : 1);
+}
+
+/** Concede the current frame: the opponent of `concedingSlot` wins it. */
+export function concedeFrame(state: MatchLiveState, concedingSlot: Slot): MatchLiveState {
+  if (state.status === 'completed' || !state.frame) {
+    throw new EngineError('match_not_live', 'Match is not live');
+  }
+  const bumped: MatchLiveState = { ...state, status: 'live', version: state.version + 1 };
+  return settleFrame(bumped, state.frame, other(concedingSlot));
+}
+
+/** Concede the match: the opponent of `concedingSlot` wins immediately. */
+export function concedeMatch(state: MatchLiveState, concedingSlot: Slot): MatchLiveState {
+  if (state.status === 'completed' || !state.frame) {
+    throw new EngineError('match_not_live', 'Match is not live');
+  }
+  const winner = other(concedingSlot);
+  const target = framesToWin(state.bestOf);
+  const framesWon: [number, number] =
+    winner === 0 ? [target, state.framesWon[1]] : [state.framesWon[0], target];
+  return { ...state, status: 'completed', framesWon, frame: undefined, version: state.version + 1 };
 }
 
 /** Keep the running max single-visit break per slot. */
@@ -69,19 +94,10 @@ function isTableCleared(frame: FrameState): boolean {
 }
 
 /**
- * Settle a cleared frame: award it to the higher score, bump `framesWon`, then
- * end the match (majority of bestOf) or open the next frame (break alternates).
- * A dead-heat at the clearance re-spots the black (full respotted-black rules
- * are deferred).
+ * Award a finished frame to `winner`, bump `framesWon`, then end the match
+ * (majority of bestOf) or open the next frame with the break alternated.
  */
-function settleFrame(state: MatchLiveState, frame: FrameState): MatchLiveState {
-  const [a, b] = frame.scores;
-
-  if (a === b) {
-    return { ...state, frame: { ...frame, colorOn: 'black', pointsRemaining: 7 } };
-  }
-
-  const winner: Slot = a > b ? 0 : 1;
+function settleFrame(state: MatchLiveState, frame: FrameState, winner: Slot): MatchLiveState {
   const framesWon: [number, number] =
     winner === 0
       ? [state.framesWon[0] + 1, state.framesWon[1]]

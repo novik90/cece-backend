@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { MatchLiveState, ScoringAction, Slot } from '@cece/contract';
-import { initialMatchState, reduceMatch, EngineError, type FrameAction } from '@cece/engine';
+import {
+  initialMatchState,
+  reduceMatch,
+  concedeFrame,
+  concedeMatch,
+  EngineError,
+  type FrameAction,
+} from '@cece/engine';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiError } from '../common/api-error';
 import { toParticipantsTuple, type MatchWithParticipants } from '../common/match.mapper';
@@ -33,40 +40,59 @@ export class MatchStateService {
 
   /**
    * Apply a scoring action: validate via the engine, append to the event log,
-   * and update the persisted match row — atomically. Returns the new live state.
-   * Handles pot/foul/endVisit and undo; concede lands with #26.
+   * and update the persisted match row — atomically. `baseVersion`, if given,
+   * must match the current version (optimistic concurrency) else 409.
    */
-  async apply(matchId: string, userId: string, action: ScoringAction): Promise<MatchLiveState> {
+  async apply(
+    matchId: string,
+    userId: string,
+    action: ScoringAction,
+    baseVersion?: number,
+  ): Promise<MatchLiveState> {
     return this.prisma.$transaction(async (tx) => {
       const match = await tx.match.findUnique({ where: { id: matchId }, include: MATCH_LOAD });
       if (!match) throw new ApiError(404, 'match_not_found', 'Match not found');
       const me = requireParticipant(match, userId);
+      const actor: Slot = me.slot === 1 ? 1 : 0;
 
-      const seq = match.events.length;
-      const actorSlot: Slot = me.slot === 1 ? 1 : 0;
-      const next =
-        action.type === 'undo'
-          ? this.computeUndo(match)
-          : this.computeAction(match, action, actorSlot);
+      const current = buildState(match);
+      if (baseVersion !== undefined && baseVersion !== current.version) {
+        throw new ApiError(
+          409,
+          'version_conflict',
+          `Stale action (base ${baseVersion}, current ${current.version})`,
+        );
+      }
 
+      const next = this.computeNext(match, current, action, actor);
       await tx.matchEvent.create({
-        data: { matchId, seq, type: action.type, payload: payloadOf(action), byUserId: userId },
+        data: {
+          matchId,
+          seq: match.events.length,
+          type: action.type,
+          payload: payloadOf(action, actor),
+          byUserId: userId,
+        },
       });
       await tx.match.update({ where: { id: matchId }, data: matchRowPatch(next) });
       return next;
     });
   }
 
-  private computeUndo(match: LoadedMatch): MatchLiveState {
-    if (effectiveEvents(match.events).length === 0) {
-      throw new ApiError(409, 'nothing_to_undo', 'Nothing to undo');
+  private computeNext(
+    match: LoadedMatch,
+    current: MatchLiveState,
+    action: ScoringAction,
+    actor: Slot,
+  ): MatchLiveState {
+    if (action.type === 'undo') {
+      if (effectiveEvents(match.events).length === 0) {
+        throw new ApiError(409, 'nothing_to_undo', 'Nothing to undo');
+      }
+      // Append the undo event and re-fold (undo-aware fold cancels the last action).
+      return buildState({ ...match, events: [...match.events, { type: 'undo', payload: {} }] });
     }
-    // Append the undo event and re-fold (undo-aware fold pops the last action).
-    return buildState({ ...match, events: [...match.events, { type: 'undo', payload: {} }] });
-  }
 
-  private computeAction(match: LoadedMatch, action: ScoringAction, actor: Slot): MatchLiveState {
-    const current = buildState(match);
     if (
       action.type === 'pot' &&
       current.selfScoringDisabled &&
@@ -74,8 +100,9 @@ export class MatchStateService {
     ) {
       throw new ApiError(403, 'self_scoring_forbidden', 'You cannot score points for yourself');
     }
+
     try {
-      const next = reduceMatch(current, action as FrameAction);
+      const next = applyAction(current, action, actor);
       return { ...next, version: match.events.length + 1 };
     } catch (err) {
       if (err instanceof EngineError) throw engineToApi(err);
@@ -88,6 +115,18 @@ function requireParticipant(match: MatchWithParticipants, userId: string) {
   const me = match.participants.find((p) => p.userId === userId);
   if (!me) throw new ApiError(403, 'not_participant', 'You are not a participant of this match');
   return me;
+}
+
+/** Run one action through the engine (concede is match-level; the rest in-frame). */
+function applyAction(state: MatchLiveState, action: ScoringAction, actor: Slot): MatchLiveState {
+  switch (action.type) {
+    case 'concedeFrame':
+      return concedeFrame(state, actor);
+    case 'concedeMatch':
+      return concedeMatch(state, actor);
+    default:
+      return reduceMatch(state, action as FrameAction);
+  }
 }
 
 /** Drop the action cancelled by each `undo` event (append-only, audit kept). */
@@ -110,15 +149,19 @@ function buildState(match: LoadedMatch): MatchLiveState {
     firstBreaker: (match.firstBreakerSlot === 1 ? 1 : 0) satisfies Slot,
   });
   const state = effectiveEvents(match.events).reduce<MatchLiveState>((s, ev) => {
-    const action = { type: ev.type, ...(ev.payload as object) } as FrameAction;
-    return reduceMatch(s, action);
+    const payload = (ev.payload ?? {}) as Record<string, unknown>;
+    if (ev.type === 'concedeFrame' || ev.type === 'concedeMatch') {
+      return applyAction(s, { type: ev.type }, payload.by === 1 ? 1 : 0);
+    }
+    return applyAction(s, { type: ev.type, ...payload } as ScoringAction, 0);
   }, initial);
   return { ...state, version: match.events.length };
 }
 
-function payloadOf(action: ScoringAction): Prisma.InputJsonValue {
+function payloadOf(action: ScoringAction, actor: Slot): Prisma.InputJsonValue {
   if (action.type === 'pot') return { ball: action.ball };
   if (action.type === 'foul') return { points: action.points };
+  if (action.type === 'concedeFrame' || action.type === 'concedeMatch') return { by: actor };
   return {};
 }
 

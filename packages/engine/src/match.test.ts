@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { Ball, MatchLiveState, Slot } from '@cece/contract';
-import { initialMatchState, reduceMatch, EngineError, type FrameAction } from './index';
+import {
+  initialMatchState,
+  reduceMatch,
+  concedeFrame,
+  concedeMatch,
+  EngineError,
+  type FrameAction,
+} from './index';
 
 const participants: MatchLiveState['participants'] = [
   { kind: 'guest', name: 'A' },
@@ -78,6 +85,37 @@ describe('match end', () => {
     expect(m.status).toBe('completed');
     expect(m.framesWon).toEqual([2, 0]);
     expect(m.frame).toBeUndefined();
+  });
+});
+
+describe('concede', () => {
+  it('concedeFrame awards the frame to the opponent and opens the next', () => {
+    let m = reduceMatch(newMatch(5, 0), { type: 'pot', ball: 'red' }); // slot 0 leads
+    m = concedeFrame(m, 1); // slot 1 concedes
+    expect(m.framesWon).toEqual([1, 0]);
+    expect(m.status).toBe('live');
+    expect(m.frame).toMatchObject({ frameNumber: 2, breaker: 1 });
+  });
+
+  it('concedeFrame can end the match at match point', () => {
+    let m = clearFrameBy(newMatch(3, 0), 0); // 1-0
+    m = concedeFrame(m, 1); // slot 1 concedes frame 2 → slot 0 → 2-0
+    expect(m.status).toBe('completed');
+    expect(m.framesWon).toEqual([2, 0]);
+    expect(m.frame).toBeUndefined();
+  });
+
+  it('concedeMatch hands the match to the opponent immediately', () => {
+    const m = concedeMatch(newMatch(5, 0), 0); // slot 0 concedes → slot 1 wins
+    expect(m.status).toBe('completed');
+    expect(m.framesWon).toEqual([0, 3]); // framesToWin(5) = 3
+    expect(m.frame).toBeUndefined();
+  });
+
+  it('rejects conceding a completed match', () => {
+    const done = concedeMatch(newMatch(3, 0), 0);
+    expect(() => concedeFrame(done, 0)).toThrow(EngineError);
+    expect(() => concedeMatch(done, 0)).toThrow(EngineError);
   });
 });
 

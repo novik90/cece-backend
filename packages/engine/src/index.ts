@@ -9,4 +9,10 @@ export const ENGINE_VERSION = '0.0.0' as const;
 
 export { EngineError } from './error';
 export { initialFrameState, applyScoringAction, type FrameAction } from './frame';
-export { initialMatchState, reduceMatch, type NewMatchParams } from './match';
+export {
+  initialMatchState,
+  reduceMatch,
+  concedeFrame,
+  concedeMatch,
+  type NewMatchParams,
+} from './match';
