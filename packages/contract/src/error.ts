@@ -19,6 +19,16 @@ export const errorCodeSchema = z.enum([
   'self_scoring_forbidden',
   'nothing_to_undo',
   'version_conflict',
+  // Phase 3 — friends & match invites
+  'already_friends',
+  'friend_request_exists',
+  'friend_request_not_found',
+  'request_not_pending',
+  'not_friends',
+  'invite_not_found',
+  'invite_not_pending',
+  'invite_expired',
+  'forbidden',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
