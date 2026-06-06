@@ -6,9 +6,18 @@ import {
   type OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
+  WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
-import { WS_CLIENT_EVENTS, WS_SERVER_EVENTS, matchJoinSchema, type ActionAck } from '@cece/contract';
+import {
+  WS_CLIENT_EVENTS,
+  WS_SERVER_EVENTS,
+  matchJoinSchema,
+  potPayloadSchema,
+  foulPayloadSchema,
+  type ActionAck,
+  type ScoringAction,
+} from '@cece/contract';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiError } from '../common/api-error';
 import type { JwtPayload } from '../auth/jwt-payload';
@@ -32,17 +41,21 @@ function toAck(err: unknown): ActionAck {
   return { error: { code: 'internal_error', message: 'Internal server error' } };
 }
 
+const invalidPayload: ActionAck = {
+  error: { code: 'validation_error', message: 'Invalid payload' },
+};
+
 /**
- * Real-time scoring channel. Phase 2 / task #24: authenticate the connection
- * (JWT in the handshake) and let participants join their match room, receiving a
- * full `match:state` snapshot on join/reconnect. Action handling is separate.
- *
- * Auth runs as Socket.IO middleware (during the handshake, before any event) so
- * `socket.data.userId` is guaranteed set by the time messages are handled.
+ * Real-time scoring channel (Phase 2). Authenticates the connection via JWT in
+ * the handshake (middleware, before any event), lets participants join their
+ * match room, and applies scoring actions: validate via the engine, append to
+ * the log, then broadcast the full `match:state` to the room.
  */
 @WebSocketGateway({ cors: { origin: '*' } })
 export class ScoringGateway implements OnGatewayInit {
   private readonly log = new Logger(ScoringGateway.name);
+
+  @WebSocketServer() private server!: Server;
 
   constructor(
     private readonly jwt: JwtService,
@@ -72,15 +85,14 @@ export class ScoringGateway implements OnGatewayInit {
   @SubscribeMessage(WS_CLIENT_EVENTS.join)
   async onJoin(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
     const parsed = matchJoinSchema.safeParse(body);
-    if (!parsed.success) {
-      return { error: { code: 'validation_error', message: 'Invalid join payload' } };
-    }
-    const userId = client.data.userId as string | undefined;
+    if (!parsed.success) return invalidPayload;
+    const userId = userIdOf(client);
     if (!userId) return { error: { code: 'unauthorized', message: 'Not authenticated' } };
 
     try {
       const state = await this.matchState.snapshot(parsed.data.matchId, userId);
       await client.join(roomFor(parsed.data.matchId));
+      client.data.matchId = parsed.data.matchId;
       client.emit(WS_SERVER_EVENTS.state, state);
       return { ok: true, version: state.version };
     } catch (err) {
@@ -88,4 +100,47 @@ export class ScoringGateway implements OnGatewayInit {
       return toAck(err);
     }
   }
+
+  @SubscribeMessage(WS_CLIENT_EVENTS.pot)
+  onPot(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
+    const parsed = potPayloadSchema.safeParse(body);
+    if (!parsed.success) return Promise.resolve(invalidPayload);
+    return this.applyAndBroadcast(client, { type: 'pot', ball: parsed.data.ball });
+  }
+
+  @SubscribeMessage(WS_CLIENT_EVENTS.foul)
+  onFoul(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
+    const parsed = foulPayloadSchema.safeParse(body);
+    if (!parsed.success) return Promise.resolve(invalidPayload);
+    return this.applyAndBroadcast(client, { type: 'foul', points: parsed.data.points });
+  }
+
+  @SubscribeMessage(WS_CLIENT_EVENTS.endVisit)
+  onEndVisit(@ConnectedSocket() client: Socket): Promise<ActionAck> {
+    return this.applyAndBroadcast(client, { type: 'endVisit' });
+  }
+
+  @SubscribeMessage(WS_CLIENT_EVENTS.undo)
+  onUndo(@ConnectedSocket() client: Socket): Promise<ActionAck> {
+    return this.applyAndBroadcast(client, { type: 'undo' });
+  }
+
+  private async applyAndBroadcast(client: Socket, action: ScoringAction): Promise<ActionAck> {
+    const userId = userIdOf(client);
+    const matchId = client.data.matchId as string | undefined;
+    if (!userId) return { error: { code: 'unauthorized', message: 'Not authenticated' } };
+    if (!matchId) return { error: { code: 'validation_error', message: 'Join a match first' } };
+
+    try {
+      const state = await this.matchState.apply(matchId, userId, action);
+      this.server.to(roomFor(matchId)).emit(WS_SERVER_EVENTS.state, state);
+      return { ok: true, version: state.version };
+    } catch (err) {
+      return toAck(err);
+    }
+  }
+}
+
+function userIdOf(client: Socket): string | undefined {
+  return client.data.userId as string | undefined;
 }
