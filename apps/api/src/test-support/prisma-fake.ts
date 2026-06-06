@@ -56,7 +56,77 @@ interface EventRow {
 type LoadedParticipant = ParticipantRow & { user: UserRow | null };
 type LoadedMatch = MatchRow & { participants: LoadedParticipant[]; events: EventRow[] };
 
+type FriendshipStatus = 'pending' | 'accepted';
+
+interface FriendshipRow {
+  id: string;
+  requesterId: string;
+  addresseeId: string;
+  status: FriendshipStatus;
+  createdAt: Date;
+  respondedAt: Date | null;
+}
+
+type MatchInviteStatus = 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired';
+
+interface MatchInviteRow {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  bestOf: number;
+  selfScoringDisabled: boolean;
+  firstBreakerSlot: number;
+  status: MatchInviteStatus;
+  matchId: string | null;
+  createdAt: Date;
+  expiresAt: Date;
+  respondedAt: Date | null;
+}
+
 const CREATED_AT_BASE = Date.UTC(2026, 0, 1);
+
+/**
+ * Minimal Prisma `where` evaluator covering the shapes friends/invites use:
+ * scalar equality, `{ in: [...] }`, `{ not: x }`, and `OR: [...]`. Enough for the
+ * fake; not a general-purpose matcher.
+ */
+function whereMatch(row: object, where: Record<string, unknown>): boolean {
+  const r = row as Record<string, unknown>;
+  for (const [key, cond] of Object.entries(where)) {
+    if (key === 'OR') {
+      const clauses = cond as Array<Record<string, unknown>>;
+      if (!clauses.some((c) => whereMatch(row, c))) return false;
+      continue;
+    }
+    if (key === 'AND') {
+      const clauses = cond as Array<Record<string, unknown>>;
+      if (!clauses.every((c) => whereMatch(row, c))) return false;
+      continue;
+    }
+    const value = r[key];
+    if (cond !== null && typeof cond === 'object' && !(cond instanceof Date)) {
+      const c = cond as Record<string, unknown>;
+      if ('in' in c && !(c.in as unknown[]).includes(value)) return false;
+      if ('not' in c && value === c.not) return false;
+    } else if (value !== cond) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Sort by a single `{ field: 'asc'|'desc' }` orderBy (createdAt in practice). */
+function applyOrderBy<T extends object>(rows: T[], orderBy?: unknown): T[] {
+  if (!orderBy || typeof orderBy !== 'object') return rows;
+  const [field, dir] = Object.entries(orderBy as Record<string, 'asc' | 'desc'>)[0] ?? [];
+  if (!field) return rows;
+  return [...rows].sort((a, b) => {
+    const av = (a as Record<string, unknown>)[field] as number | Date;
+    const bv = (b as Record<string, unknown>)[field] as number | Date;
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return dir === 'desc' ? -cmp : cmp;
+  });
+}
 
 function uniqueViolation(target: string): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
@@ -71,6 +141,8 @@ export class FakePrisma {
   private readonly matches: MatchRow[] = [];
   private readonly participants: ParticipantRow[] = [];
   private readonly events: EventRow[] = [];
+  private readonly friendships: FriendshipRow[] = [];
+  private readonly matchInvites: MatchInviteRow[] = [];
   private seq = 0;
 
   /** Run a callback "in a transaction" — the fake is its own tx client. */
@@ -224,6 +296,172 @@ export class FakePrisma {
       return Promise.resolve({ ...row });
     },
   };
+
+  readonly friendship = {
+    create: (args: {
+      data: {
+        requesterId: string;
+        addresseeId: string;
+        status?: FriendshipStatus;
+        respondedAt?: Date | null;
+      };
+      include?: unknown;
+    }): Promise<unknown> => {
+      const { data } = args;
+      const dup = this.friendships.some(
+        (f) => f.requesterId === data.requesterId && f.addresseeId === data.addresseeId,
+      );
+      if (dup) throw uniqueViolation('requester_id_addressee_id');
+      const row: FriendshipRow = {
+        id: randomUUID(),
+        requesterId: data.requesterId,
+        addresseeId: data.addresseeId,
+        status: data.status ?? 'pending',
+        createdAt: new Date(CREATED_AT_BASE + this.seq++),
+        respondedAt: data.respondedAt ?? null,
+      };
+      this.friendships.push(row);
+      return Promise.resolve(this.loadFriendship(row, args.include));
+    },
+
+    findFirst: (args: { where: Record<string, unknown>; include?: unknown }): Promise<unknown> => {
+      const row = this.friendships.find((f) => whereMatch(f, args.where));
+      return Promise.resolve(row ? this.loadFriendship(row, args.include) : null);
+    },
+
+    findUnique: (args: {
+      where: {
+        id?: string;
+        requesterId_addresseeId?: { requesterId: string; addresseeId: string };
+      };
+      include?: unknown;
+    }): Promise<unknown> => {
+      const { where } = args;
+      const row = this.friendships.find((f) => {
+        if (where.id !== undefined) return f.id === where.id;
+        const k = where.requesterId_addresseeId;
+        return k !== undefined && f.requesterId === k.requesterId && f.addresseeId === k.addresseeId;
+      });
+      return Promise.resolve(row ? this.loadFriendship(row, args.include) : null);
+    },
+
+    findMany: (args: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+      include?: unknown;
+    }): Promise<unknown[]> => {
+      let rows = this.friendships.filter((f) => !args.where || whereMatch(f, args.where));
+      rows = applyOrderBy(rows, args.orderBy);
+      return Promise.resolve(rows.map((f) => this.loadFriendship(f, args.include)));
+    },
+
+    update: (args: {
+      where: { id: string };
+      data: Partial<FriendshipRow>;
+      include?: unknown;
+    }): Promise<unknown> => {
+      const row = this.friendships.find((f) => f.id === args.where.id);
+      if (!row) throw new Error(`friendship ${args.where.id} not found`);
+      Object.assign(row, args.data);
+      return Promise.resolve(this.loadFriendship(row, args.include));
+    },
+
+    delete: (args: { where: { id: string } }): Promise<unknown> => {
+      const idx = this.friendships.findIndex((f) => f.id === args.where.id);
+      if (idx === -1) throw new Error(`friendship ${args.where.id} not found`);
+      const [row] = this.friendships.splice(idx, 1);
+      return Promise.resolve(this.loadFriendship(row!, undefined));
+    },
+
+    deleteMany: (args: { where: Record<string, unknown> }): Promise<{ count: number }> => {
+      const before = this.friendships.length;
+      for (let i = this.friendships.length - 1; i >= 0; i--) {
+        if (whereMatch(this.friendships[i]!, args.where)) this.friendships.splice(i, 1);
+      }
+      return Promise.resolve({ count: before - this.friendships.length });
+    },
+  };
+
+  readonly matchInvite = {
+    create: (args: {
+      data: {
+        fromUserId: string;
+        toUserId: string;
+        bestOf: number;
+        selfScoringDisabled?: boolean;
+        firstBreakerSlot?: number;
+        expiresAt: Date;
+      };
+      include?: unknown;
+    }): Promise<unknown> => {
+      const { data } = args;
+      const row: MatchInviteRow = {
+        id: randomUUID(),
+        fromUserId: data.fromUserId,
+        toUserId: data.toUserId,
+        bestOf: data.bestOf,
+        selfScoringDisabled: data.selfScoringDisabled ?? false,
+        firstBreakerSlot: data.firstBreakerSlot ?? 0,
+        status: 'pending',
+        matchId: null,
+        createdAt: new Date(CREATED_AT_BASE + this.seq++),
+        expiresAt: data.expiresAt,
+        respondedAt: null,
+      };
+      this.matchInvites.push(row);
+      return Promise.resolve(this.loadInvite(row, args.include));
+    },
+
+    findUnique: (args: { where: { id: string }; include?: unknown }): Promise<unknown> => {
+      const row = this.matchInvites.find((i) => i.id === args.where.id);
+      return Promise.resolve(row ? this.loadInvite(row, args.include) : null);
+    },
+
+    findMany: (args: {
+      where?: Record<string, unknown>;
+      orderBy?: unknown;
+      include?: unknown;
+    }): Promise<unknown[]> => {
+      let rows = this.matchInvites.filter((i) => !args.where || whereMatch(i, args.where));
+      rows = applyOrderBy(rows, args.orderBy);
+      return Promise.resolve(rows.map((i) => this.loadInvite(i, args.include)));
+    },
+
+    update: (args: {
+      where: { id: string };
+      data: Partial<MatchInviteRow>;
+      include?: unknown;
+    }): Promise<unknown> => {
+      const row = this.matchInvites.find((i) => i.id === args.where.id);
+      if (!row) throw new Error(`match invite ${args.where.id} not found`);
+      Object.assign(row, args.data);
+      return Promise.resolve(this.loadInvite(row, args.include));
+    },
+  };
+
+  /** Attach requester/addressee user rows when `include` asks for them. */
+  private loadFriendship(f: FriendshipRow, include: unknown): unknown {
+    const inc = (include ?? {}) as { requester?: boolean; addressee?: boolean };
+    return {
+      ...f,
+      ...(inc.requester ? { requester: this.findUserRow(f.requesterId) } : {}),
+      ...(inc.addressee ? { addressee: this.findUserRow(f.addresseeId) } : {}),
+    };
+  }
+
+  /** Attach from/to user rows when `include` asks for them. */
+  private loadInvite(i: MatchInviteRow, include: unknown): unknown {
+    const inc = (include ?? {}) as { from?: boolean; to?: boolean };
+    return {
+      ...i,
+      ...(inc.from ? { from: this.findUserRow(i.fromUserId) } : {}),
+      ...(inc.to ? { to: this.findUserRow(i.toUserId) } : {}),
+    };
+  }
+
+  private findUserRow(id: string): UserRow | null {
+    return this.users.find((u) => u.id === id) ?? null;
+  }
 
   /** Assemble a match with its participants (+users) and its event log (by seq). */
   private load(m: MatchRow): LoadedMatch {
