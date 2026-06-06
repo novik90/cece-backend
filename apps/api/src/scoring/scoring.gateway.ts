@@ -3,11 +3,11 @@ import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
   MessageBody,
-  type OnGatewayConnection,
+  type OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
 } from '@nestjs/websockets';
-import type { Socket } from 'socket.io';
+import type { Server, Socket } from 'socket.io';
 import { WS_CLIENT_EVENTS, WS_SERVER_EVENTS, matchJoinSchema, type ActionAck } from '@cece/contract';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiError } from '../common/api-error';
@@ -34,11 +34,14 @@ function toAck(err: unknown): ActionAck {
 
 /**
  * Real-time scoring channel. Phase 2 / task #24: authenticate the connection
- * (JWT in the handshake), let participants join their match room, and push a
+ * (JWT in the handshake) and let participants join their match room, receiving a
  * full `match:state` snapshot on join/reconnect. Action handling is separate.
+ *
+ * Auth runs as Socket.IO middleware (during the handshake, before any event) so
+ * `socket.data.userId` is guaranteed set by the time messages are handled.
  */
 @WebSocketGateway({ cors: { origin: '*' } })
-export class ScoringGateway implements OnGatewayConnection {
+export class ScoringGateway implements OnGatewayInit {
   private readonly log = new Logger(ScoringGateway.name);
 
   constructor(
@@ -47,19 +50,23 @@ export class ScoringGateway implements OnGatewayConnection {
     private readonly matchState: MatchStateService,
   ) {}
 
-  async handleConnection(client: Socket): Promise<void> {
-    try {
-      const token = extractToken(client);
-      const { sub } = await this.jwt.verifyAsync<JwtPayload>(token);
-      const user = await this.prisma.user.findUnique({ where: { id: sub } });
-      if (!user) throw new Error('user no longer exists');
-      client.data.userId = user.id;
-    } catch {
-      client.emit(WS_SERVER_EVENTS.error, {
-        error: { code: 'unauthorized', message: 'Invalid or missing token' },
-      });
-      client.disconnect();
-    }
+  afterInit(server: Server): void {
+    server.use((socket: Socket, next: (err?: Error) => void) => {
+      void this.authenticate(socket)
+        .then((userId) => {
+          socket.data.userId = userId;
+          next();
+        })
+        .catch(() => next(new Error('unauthorized')));
+    });
+  }
+
+  private async authenticate(client: Socket): Promise<string> {
+    const token = extractToken(client);
+    const { sub } = await this.jwt.verifyAsync<JwtPayload>(token);
+    const user = await this.prisma.user.findUnique({ where: { id: sub } });
+    if (!user) throw new Error('user no longer exists');
+    return user.id;
   }
 
   @SubscribeMessage(WS_CLIENT_EVENTS.join)
