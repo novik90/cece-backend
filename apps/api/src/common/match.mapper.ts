@@ -27,12 +27,14 @@ function toParticipant(p: PrismaParticipant & { user: PrismaUser | null }): Part
   return { kind: 'guest', name: p.guestName ?? 'Unknown player' };
 }
 
-export function toMatchSummary(m: MatchWithParticipants): MatchSummary {
+/** The two participants as a slot-ordered tuple. */
+export function toParticipantsTuple(m: MatchWithParticipants): [Participant, Participant] {
   const bySlot = [...m.participants].sort((a, b) => a.slot - b.slot);
-  const participants: [Participant, Participant] = [
-    toParticipant(bySlot[0]!),
-    toParticipant(bySlot[1]!),
-  ];
+  return [toParticipant(bySlot[0]!), toParticipant(bySlot[1]!)];
+}
+
+export function toMatchSummary(m: MatchWithParticipants): MatchSummary {
+  const participants = toParticipantsTuple(m);
   const framesWon: FramesWon = [m.framesWonA, m.framesWonB];
 
   const summary: MatchSummary = {
