@@ -13,7 +13,7 @@ const VALID = {
 let app: INestApplication;
 
 beforeEach(async () => {
-  app = await createE2eApp();
+  ({ app } = await createE2eApp());
 });
 afterEach(async () => {
   await app.close();

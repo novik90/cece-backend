@@ -34,14 +34,27 @@ interface MatchRow {
   framesWonA: number;
   framesWonB: number;
   winnerSlot: number | null;
+  selfScoringDisabled: boolean;
+  firstBreakerSlot: number;
   activeScorerUserId: string | null;
   createdAt: Date;
   completedAt: Date | null;
   seq: number;
 }
 
+interface EventRow {
+  id: string;
+  matchId: string;
+  frameId: string | null;
+  seq: number;
+  type: string;
+  payload: unknown;
+  byUserId: string | null;
+  createdAt: Date;
+}
+
 type LoadedParticipant = ParticipantRow & { user: UserRow | null };
-type LoadedMatch = MatchRow & { participants: LoadedParticipant[] };
+type LoadedMatch = MatchRow & { participants: LoadedParticipant[]; events: EventRow[] };
 
 const CREATED_AT_BASE = Date.UTC(2026, 0, 1);
 
@@ -57,7 +70,13 @@ export class FakePrisma {
   private readonly users: UserRow[] = [];
   private readonly matches: MatchRow[] = [];
   private readonly participants: ParticipantRow[] = [];
+  private readonly events: EventRow[] = [];
   private seq = 0;
+
+  /** Run a callback "in a transaction" — the fake is its own tx client. */
+  $transaction<T>(cb: (tx: this) => Promise<T>): Promise<T> {
+    return cb(this);
+  }
 
   readonly user = {
     create: (args: {
@@ -111,6 +130,8 @@ export class FakePrisma {
       data: {
         ownerId: string;
         bestOf: number;
+        selfScoringDisabled?: boolean;
+        firstBreakerSlot?: number;
         participants: { create: Array<{ slot: number; userId?: string; guestName?: string }> };
       };
     }): Promise<LoadedMatch> => {
@@ -123,6 +144,8 @@ export class FakePrisma {
         framesWonA: 0,
         framesWonB: 0,
         winnerSlot: null,
+        selfScoringDisabled: data.selfScoringDisabled ?? false,
+        firstBreakerSlot: data.firstBreakerSlot ?? 0,
         activeScorerUserId: null,
         createdAt: new Date(CREATED_AT_BASE + this.seq),
         completedAt: null,
@@ -137,6 +160,13 @@ export class FakePrisma {
           guestName: p.guestName ?? null,
         });
       }
+      return Promise.resolve(this.load(row));
+    },
+
+    update: (args: { where: { id: string }; data: Partial<MatchRow> }): Promise<LoadedMatch> => {
+      const row = this.matches.find((m) => m.id === args.where.id);
+      if (!row) throw new Error(`match ${args.where.id} not found`);
+      Object.assign(row, args.data);
       return Promise.resolve(this.load(row));
     },
 
@@ -165,7 +195,37 @@ export class FakePrisma {
     },
   };
 
-  /** Assemble a match with its participants and their (optional) users. */
+  readonly matchEvent = {
+    create: (args: {
+      data: {
+        matchId: string;
+        frameId?: string | null;
+        seq: number;
+        type: string;
+        payload: unknown;
+        byUserId?: string | null;
+      };
+    }): Promise<EventRow> => {
+      const { data } = args;
+      if (this.events.some((e) => e.matchId === data.matchId && e.seq === data.seq)) {
+        throw uniqueViolation('match_id_seq');
+      }
+      const row: EventRow = {
+        id: randomUUID(),
+        matchId: data.matchId,
+        frameId: data.frameId ?? null,
+        seq: data.seq,
+        type: data.type,
+        payload: data.payload,
+        byUserId: data.byUserId ?? null,
+        createdAt: new Date(CREATED_AT_BASE + this.seq++),
+      };
+      this.events.push(row);
+      return Promise.resolve({ ...row });
+    },
+  };
+
+  /** Assemble a match with its participants (+users) and its event log (by seq). */
   private load(m: MatchRow): LoadedMatch {
     const participants: LoadedParticipant[] = this.participants
       .filter((p) => p.matchId === m.id)
@@ -173,6 +233,10 @@ export class FakePrisma {
         ...p,
         user: p.userId ? (this.users.find((u) => u.id === p.userId) ?? null) : null,
       }));
-    return { ...m, participants };
+    const events = this.events
+      .filter((e) => e.matchId === m.id)
+      .sort((a, b) => a.seq - b.seq)
+      .map((e) => ({ ...e }));
+    return { ...m, participants, events };
   }
 }
