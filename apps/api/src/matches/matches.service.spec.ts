@@ -20,6 +20,7 @@ type PrismaMock = {
     findMany: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
   };
+  friendship: { findFirst: ReturnType<typeof vi.fn> };
 };
 
 let prisma: PrismaMock;
@@ -29,6 +30,7 @@ beforeEach(() => {
   prisma = {
     user: { findUnique: vi.fn() },
     match: { create: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
+    friendship: { findFirst: vi.fn() },
   };
   service = new MatchesService(prisma as unknown as PrismaService);
 });
@@ -57,6 +59,7 @@ function fakeMatch(over: Partial<Record<string, unknown>> = {}) {
 describe('MatchesService.create (C5)', () => {
   it('creates a match against a registered user (owner = slot 0)', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'u2' });
+    prisma.friendship.findFirst.mockResolvedValue({ id: 'fr' });
     prisma.match.create.mockResolvedValue(
       fakeMatch({
         participants: [
@@ -93,6 +96,7 @@ describe('MatchesService.create (C5)', () => {
 
   it('passes selfScoringDisabled and firstBreaker through to the row', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'u2' });
+    prisma.friendship.findFirst.mockResolvedValue({ id: 'fr' });
     prisma.match.create.mockResolvedValue(fakeMatch());
     await service.create(
       'me',
@@ -118,6 +122,17 @@ describe('MatchesService.create (C5)', () => {
     const err = await service.create('me', createReq({ opponent: { userId: 'ghost' } })).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.getStatus()).toBe(404);
+    expect(prisma.match.create).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 not_friends for a direct match against a non-friend', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u2' });
+    prisma.friendship.findFirst.mockResolvedValue(null);
+
+    const err = await service.create('me', createReq({ opponent: { userId: 'u2' } })).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.getStatus()).toBe(403);
+    expect(err.getResponse().error.code).toBe('not_friends');
     expect(prisma.match.create).not.toHaveBeenCalled();
   });
 });

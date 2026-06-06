@@ -27,6 +27,19 @@ async function makeUser(handle: string): Promise<{ id: string; token: string }> 
 
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
+/** Make two users friends: `a` sends a request, `b` accepts it. */
+async function befriend(a: { token: string }, b: { id: string; token: string }): Promise<void> {
+  const req = await http()
+    .post('/v1/friends/requests')
+    .set(auth(a.token))
+    .send({ userId: b.id })
+    .expect(201);
+  await http()
+    .post(`/v1/friends/requests/${req.body.id}/accept`)
+    .set(auth(b.token))
+    .expect(200);
+}
+
 describe('Matches — create (C5)', () => {
   it('creates a match against a guest; creator is participants[0]', async () => {
     const me = await makeUser('ivan');
@@ -44,9 +57,10 @@ describe('Matches — create (C5)', () => {
     expect(res.body.participants[1]).toEqual({ kind: 'guest', name: 'Гость' });
   });
 
-  it('creates a match against a registered opponent', async () => {
+  it('creates a match against a registered (befriended) opponent', async () => {
     const me = await makeUser('ivan');
     const opp = await makeUser('oleg');
+    await befriend(me, opp);
 
     const res = await http()
       .post('/v1/matches')
@@ -55,6 +69,19 @@ describe('Matches — create (C5)', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.participants[1]).toMatchObject({ kind: 'user', userId: opp.id });
+  });
+
+  it('returns 403 not_friends for a direct match against a non-friend', async () => {
+    const me = await makeUser('ivan');
+    const opp = await makeUser('oleg');
+
+    const res = await http()
+      .post('/v1/matches')
+      .set(auth(me.token))
+      .send({ opponent: { userId: opp.id }, bestOf: 3 });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('not_friends');
   });
 
   it('returns 404 user_not_found for a missing opponent', async () => {
@@ -71,6 +98,7 @@ describe('Matches — create (C5)', () => {
   it('accepts selfScoringDisabled + firstBreaker against a registered user', async () => {
     const me = await makeUser('ivan');
     const opp = await makeUser('oleg');
+    await befriend(me, opp);
     const res = await http()
       .post('/v1/matches')
       .set(auth(me.token))
@@ -127,6 +155,7 @@ describe('Matches — list, only mine (C6)', () => {
     const a = await makeUser('alice');
     const b = await makeUser('bob');
     const c = await makeUser('carol');
+    await befriend(a, b);
 
     // alice creates a match against bob → both are participants.
     await http()
