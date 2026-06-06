@@ -8,6 +8,7 @@ import {
   opponentSchema,
   matchSchema,
   matchListQuerySchema,
+  createMatchRequestSchema,
   errorResponseSchema,
 } from './index';
 
@@ -112,6 +113,39 @@ describe('matchListQuerySchema', () => {
   it('defaults status to "all"', () => {
     const r = matchListQuerySchema.parse({});
     expect(r.status).toBe('all');
+  });
+});
+
+describe('createMatchRequestSchema', () => {
+  it('defaults selfScoringDisabled=false and firstBreaker=0', () => {
+    const r = createMatchRequestSchema.parse({ opponent: { guestName: 'Гость' }, bestOf: 5 });
+    expect(r.selfScoringDisabled).toBe(false);
+    expect(r.firstBreaker).toBe(0);
+  });
+  it('accepts selfScoringDisabled + firstBreaker against a user', () => {
+    const r = createMatchRequestSchema.safeParse({
+      opponent: { userId: 'u2' },
+      bestOf: 5,
+      selfScoringDisabled: true,
+      firstBreaker: 1,
+    });
+    expect(r.success).toBe(true);
+  });
+  it('rejects selfScoringDisabled for a guest opponent', () => {
+    const r = createMatchRequestSchema.safeParse({
+      opponent: { guestName: 'Гость' },
+      bestOf: 5,
+      selfScoringDisabled: true,
+    });
+    expect(r.success).toBe(false);
+  });
+  it('rejects an out-of-range firstBreaker', () => {
+    const r = createMatchRequestSchema.safeParse({
+      opponent: { guestName: 'Гость' },
+      bestOf: 5,
+      firstBreaker: 2,
+    });
+    expect(r.success).toBe(false);
   });
 });
 

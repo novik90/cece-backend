@@ -28,6 +28,8 @@ export class MatchesService {
       data: {
         ownerId,
         bestOf: dto.bestOf,
+        selfScoringDisabled: dto.selfScoringDisabled,
+        firstBreakerSlot: dto.firstBreaker,
         participants: {
           create: [
             { slot: 0, userId: ownerId },

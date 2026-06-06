@@ -68,6 +68,28 @@ describe('Matches — create (C5)', () => {
     expect(res.body.error.code).toBe('user_not_found');
   });
 
+  it('accepts selfScoringDisabled + firstBreaker against a registered user', async () => {
+    const me = await makeUser('ivan');
+    const opp = await makeUser('oleg');
+    const res = await http()
+      .post('/v1/matches')
+      .set(auth(me.token))
+      .send({ opponent: { userId: opp.id }, bestOf: 3, selfScoringDisabled: true, firstBreaker: 1 });
+
+    expect(res.status).toBe(201);
+  });
+
+  it('rejects selfScoringDisabled for a guest match (422)', async () => {
+    const me = await makeUser('ivan');
+    const res = await http()
+      .post('/v1/matches')
+      .set(auth(me.token))
+      .send({ opponent: { guestName: 'Гость' }, bestOf: 3, selfScoringDisabled: true });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('validation_error');
+  });
+
   it('returns 422 when the opponent is yourself', async () => {
     const me = await makeUser('ivan');
     const res = await http()

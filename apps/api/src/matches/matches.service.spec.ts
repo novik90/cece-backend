@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { CreateMatchRequest } from '@cece/contract';
 import { MatchesService } from './matches.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiError } from '../common/api-error';
+
+/** Build a create-match DTO (post-validation shape, with defaults filled). */
+const createReq = (o: Partial<CreateMatchRequest> = {}): CreateMatchRequest => ({
+  opponent: { guestName: 'Гость' },
+  bestOf: 5,
+  selfScoringDisabled: false,
+  firstBreaker: 0,
+  ...o,
+});
 
 type PrismaMock = {
   user: { findUnique: ReturnType<typeof vi.fn> };
@@ -56,7 +66,7 @@ describe('MatchesService.create (C5)', () => {
       }),
     );
 
-    const res = await service.create('me', { opponent: { userId: 'u2' }, bestOf: 5 });
+    const res = await service.create('me', createReq({ opponent: { userId: 'u2' } }));
 
     const data = prisma.match.create.mock.calls[0]![0].data;
     expect(data.ownerId).toBe('me');
@@ -73,7 +83,7 @@ describe('MatchesService.create (C5)', () => {
   it('creates a match against a guest', async () => {
     prisma.match.create.mockResolvedValue(fakeMatch());
 
-    const res = await service.create('me', { opponent: { guestName: 'Гость' }, bestOf: 5 });
+    const res = await service.create('me', createReq({ opponent: { guestName: 'Гость' } }));
 
     const data = prisma.match.create.mock.calls[0]![0].data;
     expect(data.participants.create[1]).toEqual({ slot: 1, guestName: 'Гость' });
@@ -81,9 +91,21 @@ describe('MatchesService.create (C5)', () => {
     expect(res.participants[1]).toEqual({ kind: 'guest', name: 'Гость' });
   });
 
+  it('passes selfScoringDisabled and firstBreaker through to the row', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u2' });
+    prisma.match.create.mockResolvedValue(fakeMatch());
+    await service.create(
+      'me',
+      createReq({ opponent: { userId: 'u2' }, selfScoringDisabled: true, firstBreaker: 1 }),
+    );
+    const data = prisma.match.create.mock.calls[0]![0].data;
+    expect(data.selfScoringDisabled).toBe(true);
+    expect(data.firstBreakerSlot).toBe(1);
+  });
+
   it('rejects playing against yourself with 422', async () => {
     const err = await service
-      .create('me', { opponent: { userId: 'me' }, bestOf: 5 })
+      .create('me', createReq({ opponent: { userId: 'me' } }))
       .catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.getStatus()).toBe(422);
@@ -93,7 +115,7 @@ describe('MatchesService.create (C5)', () => {
   it('returns 404 user_not_found when the opponent does not exist', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
 
-    const err = await service.create('me', { opponent: { userId: 'ghost' }, bestOf: 5 }).catch((e) => e);
+    const err = await service.create('me', createReq({ opponent: { userId: 'ghost' } })).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.getStatus()).toBe(404);
     expect(prisma.match.create).not.toHaveBeenCalled();
