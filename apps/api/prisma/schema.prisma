@@ -1,6 +1,7 @@
 // ce·ce schema.
 // Phase 1 — Auth + Users + Matches: Obsidian `Контракты v1 — Auth, Users, Matches`.
 // Phase 2 — real-time scoring (frames + event log): `Контракты v2 — Real-time скоринг`.
+// Phase 3 — friends + match invites: `Контракты v3 — Друзья и приглашения`.
 
 generator client {
   provider = "prisma-client-js"
@@ -22,6 +23,19 @@ enum FrameStatus {
   completed
 }
 
+enum FriendshipStatus {
+  pending
+  accepted
+}
+
+enum MatchInviteStatus {
+  pending
+  accepted
+  declined
+  cancelled
+  expired
+}
+
 model User {
   id           String   @id @default(uuid())
   handle       String   @unique
@@ -35,32 +49,38 @@ model User {
   participations MatchParticipant[]
   authoredEvents MatchEvent[]       @relation("EventAuthor")
 
+  friendshipsRequested Friendship[]  @relation("FriendshipRequester")
+  friendshipsReceived  Friendship[]  @relation("FriendshipAddressee")
+  invitesSent          MatchInvite[] @relation("InviteFrom")
+  invitesReceived      MatchInvite[] @relation("InviteTo")
+
   @@map("users")
 }
 
 model Match {
-  id                 String      @id @default(uuid())
-  ownerId            String      @map("owner_id")
-  bestOf             Int         @map("best_of")
-  status             MatchStatus @default(scheduled)
+  id                  String      @id @default(uuid())
+  ownerId             String      @map("owner_id")
+  bestOf              Int         @map("best_of")
+  status              MatchStatus @default(scheduled)
   // Frames won per slot, aligned with match_participants.slot (0/1).
-  framesWonA         Int         @default(0) @map("frames_won_a")
-  framesWonB         Int         @default(0) @map("frames_won_b")
+  framesWonA          Int         @default(0) @map("frames_won_a")
+  framesWonB          Int         @default(0) @map("frames_won_b")
   // Winning participant referenced by slot (0/1); null until completed.
-  winnerSlot         Int?        @map("winner_slot")
+  winnerSlot          Int?        @map("winner_slot")
   // Phase 2 scoring settings.
-  selfScoringDisabled Boolean    @default(false) @map("self_scoring_disabled")
-  firstBreakerSlot    Int        @default(0) @map("first_breaker_slot")
+  selfScoringDisabled Boolean     @default(false) @map("self_scoring_disabled")
+  firstBreakerSlot    Int         @default(0) @map("first_breaker_slot")
   // Reserved/unused: Phase 2 uses a lock-free scoring model (no active scorer).
-  activeScorerUserId String?     @map("active_scorer_user_id")
-  createdAt          DateTime    @default(now()) @map("created_at")
-  completedAt        DateTime?   @map("completed_at")
+  activeScorerUserId  String?     @map("active_scorer_user_id")
+  createdAt           DateTime    @default(now()) @map("created_at")
+  completedAt         DateTime?   @map("completed_at")
 
   owner        User               @relation("MatchOwner", fields: [ownerId], references: [id])
   activeScorer User?              @relation("ActiveScorer", fields: [activeScorerUserId], references: [id])
   participants MatchParticipant[]
   frames       Frame[]
   events       MatchEvent[]
+  invites      MatchInvite[]
 
   @@index([ownerId])
   @@map("matches")
@@ -122,4 +142,48 @@ model MatchEvent {
   @@index([matchId])
   @@index([frameId])
   @@map("match_events")
+}
+
+// Friend relationship. Friends = a row with status `accepted`, where the current
+// user is either side. No expiry: a pending request lives until answered/cancelled.
+model Friendship {
+  id          String           @id @default(uuid())
+  requesterId String           @map("requester_id")
+  addresseeId String           @map("addressee_id")
+  status      FriendshipStatus @default(pending)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  respondedAt DateTime?        @map("responded_at")
+
+  requester User @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee User @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([requesterId])
+  @@index([addresseeId])
+  @@map("friendships")
+}
+
+// Match invitation. Accepting creates the match (carrying best_of / scoring opts).
+// A pending invite expires 24h after creation; `expired` is computed lazily from
+// `expires_at` on read/accept (no cron job).
+model MatchInvite {
+  id                  String            @id @default(uuid())
+  fromUserId          String            @map("from_user_id")
+  toUserId            String            @map("to_user_id")
+  bestOf              Int               @map("best_of")
+  selfScoringDisabled Boolean           @default(false) @map("self_scoring_disabled")
+  firstBreakerSlot    Int               @default(0) @map("first_breaker_slot")
+  status              MatchInviteStatus @default(pending)
+  matchId             String?           @map("match_id")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  expiresAt           DateTime          @map("expires_at")
+  respondedAt         DateTime?         @map("responded_at")
+
+  from  User   @relation("InviteFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  to    User   @relation("InviteTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  match Match? @relation(fields: [matchId], references: [id], onDelete: SetNull)
+
+  @@index([toUserId])
+  @@index([fromUserId])
+  @@map("match_invites")
 }
