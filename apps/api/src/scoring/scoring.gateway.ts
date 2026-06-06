@@ -103,42 +103,71 @@ export class ScoringGateway implements OnGatewayInit {
 
   @SubscribeMessage(WS_CLIENT_EVENTS.pot)
   onPot(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
-    const parsed = potPayloadSchema.safeParse(body);
+    const { rest, baseVersion } = takeBaseVersion(body);
+    const parsed = potPayloadSchema.safeParse(rest);
     if (!parsed.success) return Promise.resolve(invalidPayload);
-    return this.applyAndBroadcast(client, { type: 'pot', ball: parsed.data.ball });
+    return this.applyAndBroadcast(client, { type: 'pot', ball: parsed.data.ball }, baseVersion);
   }
 
   @SubscribeMessage(WS_CLIENT_EVENTS.foul)
   onFoul(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
-    const parsed = foulPayloadSchema.safeParse(body);
+    const { rest, baseVersion } = takeBaseVersion(body);
+    const parsed = foulPayloadSchema.safeParse(rest);
     if (!parsed.success) return Promise.resolve(invalidPayload);
-    return this.applyAndBroadcast(client, { type: 'foul', points: parsed.data.points });
+    return this.applyAndBroadcast(client, { type: 'foul', points: parsed.data.points }, baseVersion);
   }
 
   @SubscribeMessage(WS_CLIENT_EVENTS.endVisit)
-  onEndVisit(@ConnectedSocket() client: Socket): Promise<ActionAck> {
-    return this.applyAndBroadcast(client, { type: 'endVisit' });
+  onEndVisit(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
+    return this.applyAndBroadcast(client, { type: 'endVisit' }, takeBaseVersion(body).baseVersion);
+  }
+
+  @SubscribeMessage(WS_CLIENT_EVENTS.concedeFrame)
+  onConcedeFrame(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
+    return this.applyAndBroadcast(client, { type: 'concedeFrame' }, takeBaseVersion(body).baseVersion);
+  }
+
+  @SubscribeMessage(WS_CLIENT_EVENTS.concedeMatch)
+  onConcedeMatch(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
+    return this.applyAndBroadcast(client, { type: 'concedeMatch' }, takeBaseVersion(body).baseVersion);
   }
 
   @SubscribeMessage(WS_CLIENT_EVENTS.undo)
-  onUndo(@ConnectedSocket() client: Socket): Promise<ActionAck> {
-    return this.applyAndBroadcast(client, { type: 'undo' });
+  onUndo(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
+    return this.applyAndBroadcast(client, { type: 'undo' }, takeBaseVersion(body).baseVersion);
   }
 
-  private async applyAndBroadcast(client: Socket, action: ScoringAction): Promise<ActionAck> {
+  private async applyAndBroadcast(
+    client: Socket,
+    action: ScoringAction,
+    baseVersion?: number,
+  ): Promise<ActionAck> {
     const userId = userIdOf(client);
     const matchId = client.data.matchId as string | undefined;
     if (!userId) return { error: { code: 'unauthorized', message: 'Not authenticated' } };
     if (!matchId) return { error: { code: 'validation_error', message: 'Join a match first' } };
 
     try {
-      const state = await this.matchState.apply(matchId, userId, action);
+      const state = await this.matchState.apply(matchId, userId, action, baseVersion);
       this.server.to(roomFor(matchId)).emit(WS_SERVER_EVENTS.state, state);
       return { ok: true, version: state.version };
     } catch (err) {
       return toAck(err);
     }
   }
+}
+
+/** Pull an optional `baseVersion` (optimistic concurrency) off the message body. */
+function takeBaseVersion(body: unknown): { rest: unknown; baseVersion?: number } {
+  if (body && typeof body === 'object') {
+    const { baseVersion, ...rest } = body as Record<string, unknown>;
+    const bv =
+      typeof baseVersion === 'number' && Number.isInteger(baseVersion) && baseVersion >= 0
+        ? baseVersion
+        : undefined;
+    return { rest, baseVersion: bv };
+  }
+  return { rest: body };
 }
 
 function userIdOf(client: Socket): string | undefined {

@@ -144,4 +144,48 @@ describe('apply', () => {
     expect(err.getStatus()).toBe(403);
     expect(tx.matchEvent.create).not.toHaveBeenCalled();
   });
+
+  it('concedeFrame awards the frame to the opponent and logs who conceded', async () => {
+    tx.match.findUnique.mockResolvedValue(twoUserMatch());
+    const s = await service.apply('m1', 'u1', { type: 'concedeFrame' }); // u1 = slot 0 concedes
+    expect(s.framesWon).toEqual([0, 1]);
+    expect(tx.matchEvent.create).toHaveBeenCalledWith({
+      data: { matchId: 'm1', seq: 0, type: 'concedeFrame', payload: { by: 0 }, byUserId: 'u1' },
+    });
+  });
+
+  it('concedeMatch completes the match for the opponent', async () => {
+    tx.match.findUnique.mockResolvedValue(twoUserMatch());
+    const s = await service.apply('m1', 'u2', { type: 'concedeMatch' }); // u2 = slot 1 concedes
+    expect(s.status).toBe('completed');
+    expect(s.framesWon).toEqual([3, 0]); // framesToWin(5) = 3 → slot 0 wins
+    expect(s.frame).toBeUndefined();
+  });
+
+  it('rejects a stale baseVersion with version_conflict (409) without writing', async () => {
+    tx.match.findUnique.mockResolvedValue(fakeMatch());
+    const err = await service
+      .apply('m1', 'u1', { type: 'pot', ball: 'red' }, 5)
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.getStatus()).toBe(409);
+    expect(tx.matchEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a matching baseVersion', async () => {
+    tx.match.findUnique.mockResolvedValue(fakeMatch());
+    const s = await service.apply('m1', 'u1', { type: 'pot', ball: 'red' }, 0);
+    expect(s.version).toBe(1);
+  });
+});
+
+describe('snapshot folds concede events', () => {
+  it('reflects a conceded frame', async () => {
+    prisma.match.findUnique.mockResolvedValue(
+      twoUserMatch({ events: [{ type: 'concedeFrame', payload: { by: 0 } }] }),
+    );
+    const s = await service.snapshot('m1', 'u1');
+    expect(s.framesWon).toEqual([0, 1]); // slot 0 conceded → slot 1 won the frame
+    expect(s.version).toBe(1);
+  });
 });
