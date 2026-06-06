@@ -6,6 +6,7 @@ import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
 import { MatchesModule } from '../matches/matches.module';
 import { ScoringModule } from '../scoring/scoring.module';
+import { FriendsModule } from '../friends/friends.module';
 import { HealthController } from '../health/health.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { AllExceptionsFilter } from '../common/all-exceptions.filter';
@@ -41,6 +42,7 @@ export async function createE2eApp(): Promise<E2eApp> {
       UsersModule,
       MatchesModule,
       ScoringModule,
+      FriendsModule,
     ],
     controllers: [HealthController],
   })

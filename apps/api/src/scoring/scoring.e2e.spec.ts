@@ -47,6 +47,19 @@ async function makeMatch(token: string, opponent: object): Promise<string> {
   return r.body.id;
 }
 
+/** A direct user-vs-user match requires friendship; make the two friends. */
+async function befriend(a: { token: string }, b: { id: string; token: string }): Promise<void> {
+  const req = await http()
+    .post('/v1/friends/requests')
+    .set('authorization', `Bearer ${a.token}`)
+    .send({ userId: b.id })
+    .expect(201);
+  await http()
+    .post(`/v1/friends/requests/${req.body.id}/accept`)
+    .set('authorization', `Bearer ${b.token}`)
+    .expect(200);
+}
+
 function connect(token: string): Socket {
   const s = io(baseUrl, { auth: { token }, transports: ['websocket'], reconnection: false });
   sockets.push(s);
@@ -120,6 +133,7 @@ describe('scoring', () => {
   it('broadcasts state to both participants on a pot', async () => {
     const a = await makeUser('alice');
     const b = await makeUser('bob');
+    await befriend(a, b);
     const matchId = await makeMatch(a.token, { userId: b.id });
     const sa = await join(a.token, matchId);
     const sb = await join(b.token, matchId);
@@ -156,6 +170,7 @@ describe('scoring', () => {
   it('forbids self-scoring when the option is on; the opponent may score', async () => {
     const a = await makeUser('alice');
     const b = await makeUser('bob');
+    await befriend(a, b);
     const matchId = await makeMatch(a.token, { userId: b.id });
     await prisma.match.update({ where: { id: matchId }, data: { selfScoringDisabled: true } });
 

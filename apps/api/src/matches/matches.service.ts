@@ -22,6 +22,20 @@ export class MatchesService {
       }
       const exists = await this.prisma.user.findUnique({ where: { id: opponent.userId } });
       if (!exists) throw new ApiError(404, 'user_not_found', 'Opponent user not found');
+      // A direct match against a registered user requires friendship; invite a
+      // non-friend instead (Phase 3, contract v3).
+      const friendship = await this.prisma.friendship.findFirst({
+        where: {
+          status: 'accepted',
+          OR: [
+            { requesterId: ownerId, addresseeId: opponent.userId },
+            { requesterId: opponent.userId, addresseeId: ownerId },
+          ],
+        },
+      });
+      if (!friendship) {
+        throw new ApiError(403, 'not_friends', 'You can only start a direct match with a friend');
+      }
     }
 
     const match = await this.prisma.match.create({
