@@ -24,6 +24,10 @@ export const passwordSchema = z.string().min(8).max(72);
 
 export const emailSchema = z.string().email().max(254);
 
+/** Minimal success envelope for actions with no resource to return. */
+export const okResponseSchema = z.object({ ok: z.literal(true) });
+export type OkResponse = z.infer<typeof okResponseSchema>;
+
 /** Best-of frames: odd integer in 1..35 (1, 3, 5, …, 35). */
 export const bestOfSchema = z
   .number()

@@ -14,3 +14,5 @@ export * from './auth';
 export * from './users';
 export * from './matches';
 export * from './scoring';
+export * from './friends';
+export * from './invites';
