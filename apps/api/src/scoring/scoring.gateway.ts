@@ -117,6 +117,11 @@ export class ScoringGateway implements OnGatewayInit {
     return this.applyAndBroadcast(client, { type: 'foul', points: parsed.data.points }, baseVersion);
   }
 
+  @SubscribeMessage(WS_CLIENT_EVENTS.freeBall)
+  onFreeBall(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
+    return this.applyAndBroadcast(client, { type: 'freeBall' }, takeBaseVersion(body).baseVersion);
+  }
+
   @SubscribeMessage(WS_CLIENT_EVENTS.endVisit)
   onEndVisit(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<ActionAck> {
     return this.applyAndBroadcast(client, { type: 'endVisit' }, takeBaseVersion(body).baseVersion);

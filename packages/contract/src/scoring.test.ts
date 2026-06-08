@@ -24,6 +24,7 @@ const frame = {
   phase: 'reds',
   currentBreak: { striker: 0, points: 0 },
   pointsRemaining: 147,
+  freeBallAvailable: false,
   status: 'in_progress',
 } as const;
 
@@ -100,6 +101,7 @@ describe('scoringActionSchema', () => {
     const actions = [
       { type: 'pot', ball: 'red' },
       { type: 'foul', points: 4 },
+      { type: 'freeBall' },
       { type: 'endVisit' },
       { type: 'concedeFrame' },
       { type: 'concedeMatch' },

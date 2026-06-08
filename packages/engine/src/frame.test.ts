@@ -97,3 +97,54 @@ describe('phase transition reds → colors', () => {
     expect(f.status).toBe('in_progress'); // completion is detected at the match level
   });
 });
+
+describe('free ball', () => {
+  const foul4: FrameAction = { type: 'foul', points: 4 };
+  const freeBall: FrameAction = { type: 'freeBall' };
+
+  it('is unavailable on a fresh frame', () => {
+    expect(initialFrameState(1, 0).freeBallAvailable).toBe(false);
+    expect(() => applyScoringAction(initialFrameState(1, 0), freeBall)).toThrow(EngineError);
+  });
+
+  it('is offered after a foul and, in the reds phase, scores 1 without removing a red', () => {
+    const afterFoul = applyScoringAction(initialFrameState(1, 0), foul4);
+    expect(afterFoul.freeBallAvailable).toBe(true);
+    expect(afterFoul.striker).toBe(1); // foul passed the turn
+
+    const f = applyScoringAction(afterFoul, freeBall);
+    expect(f.scores).toEqual([0, 5]); // 4 (foul) + 1 (free ball as a red), to slot 1
+    expect(f.redsRemaining).toBe(15); // no red removed
+    expect(f.phase).toBe('reds');
+    expect(f.currentBreak).toEqual({ striker: 1, points: 1 });
+    expect(f.freeBallAvailable).toBe(false); // consumed
+  });
+
+  it('in the colours phase scores the value of colorOn without advancing the sequence', () => {
+    let f = initialFrameState(1, 0);
+    for (let i = 0; i < 15; i++) f = applyScoringAction(f, pot('red'));
+    f = applyScoringAction(f, pot('yellow')); // free colour → colors phase, colorOn yellow
+    f = applyScoringAction(f, foul4); // offer free ball, turn → slot 1
+    expect(f.colorOn).toBe('yellow');
+
+    const before = f.scores[1];
+    const g = applyScoringAction(f, freeBall);
+    expect(g.scores[1]).toBe(before + 2); // yellow = 2
+    expect(g.colorOn).toBe('yellow'); // sequence unchanged
+    expect(g.freeBallAvailable).toBe(false);
+  });
+
+  it('a normal pot clears the offer (no free ball afterwards)', () => {
+    let f = applyScoringAction(initialFrameState(1, 0), foul4); // offer
+    f = applyScoringAction(f, pot('red')); // striker 1 pots a red → offer cleared
+    expect(f.freeBallAvailable).toBe(false);
+    expect(() => applyScoringAction(f, freeBall)).toThrow(EngineError);
+  });
+
+  it('does not regress legal multi-ball-of-same-value potting (two reds = +2, not a foul)', () => {
+    const f = play(initialFrameState(1, 0), pot('red'), pot('red'));
+    expect(f.scores).toEqual([2, 0]);
+    expect(f.redsRemaining).toBe(13);
+    expect(f.currentBreak.points).toBe(2);
+  });
+});

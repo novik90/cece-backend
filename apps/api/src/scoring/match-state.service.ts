@@ -22,7 +22,12 @@ const MATCH_LOAD = {
 } as const;
 
 function engineToApi(e: EngineError): ApiError {
-  const status = e.code === 'match_not_live' ? 409 : e.code === 'invalid_action' ? 422 : 403;
+  const status =
+    e.code === 'match_not_live'
+      ? 409
+      : e.code === 'invalid_action' || e.code === 'free_ball_not_available'
+        ? 422
+        : 403;
   return new ApiError(status, e.code, e.message);
 }
 
@@ -94,7 +99,7 @@ export class MatchStateService {
     }
 
     if (
-      action.type === 'pot' &&
+      (action.type === 'pot' || action.type === 'freeBall') &&
       current.selfScoringDisabled &&
       current.frame?.striker === actor
     ) {

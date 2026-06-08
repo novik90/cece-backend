@@ -19,6 +19,7 @@ export const errorCodeSchema = z.enum([
   'self_scoring_forbidden',
   'nothing_to_undo',
   'version_conflict',
+  'free_ball_not_available',
   // Phase 3 — friends & match invites
   'already_friends',
   'friend_request_exists',

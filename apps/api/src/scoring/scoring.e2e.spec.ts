@@ -167,6 +167,29 @@ describe('scoring', () => {
     expect(afterUndo.version).toBe(4); // pot, pot, endVisit, undo
   });
 
+  it('offers a free ball after a foul and applies score:freeBall', async () => {
+    const me = await makeUser('ivan');
+    const matchId = await makeMatch(me.token, { guestName: 'Гость' });
+    const s = await join(me.token, matchId);
+
+    // free ball not available yet
+    expect(await emit(s, 'score:freeBall', {})).toEqual({
+      error: { code: 'free_ball_not_available', message: expect.any(String) },
+    });
+
+    let st = nextState(s);
+    await emit(s, 'score:foul', { points: 4 }); // turn → slot 1, free ball offered
+    expect((await st).frame!.freeBallAvailable).toBe(true);
+
+    st = nextState(s);
+    const ack = await emit(s, 'score:freeBall', {});
+    expect(ack).toEqual({ ok: true, version: 2 });
+    const seen = await st;
+    expect(seen.frame!.scores).toEqual([0, 5]); // foul 4 + free ball 1, to slot 1
+    expect(seen.frame!.redsRemaining).toBe(15); // no red removed
+    expect(seen.frame!.freeBallAvailable).toBe(false);
+  });
+
   it('forbids self-scoring when the option is on; the opponent may score', async () => {
     const a = await makeUser('alice');
     const b = await makeUser('bob');
