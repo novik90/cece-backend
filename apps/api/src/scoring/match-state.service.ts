@@ -14,9 +14,9 @@ import { ApiError } from '../common/api-error';
 import { toParticipantsTuple, type MatchWithParticipants } from '../common/match.mapper';
 
 type StoredEvent = { type: string; payload: Prisma.JsonValue };
-type LoadedMatch = MatchWithParticipants & { events: StoredEvent[] };
+export type LoadedMatch = MatchWithParticipants & { events: StoredEvent[] };
 
-const MATCH_LOAD = {
+export const MATCH_LOAD = {
   participants: { include: { user: true } },
   events: { orderBy: { seq: 'asc' } },
 } as const;
@@ -40,7 +40,7 @@ export class MatchStateService {
     const match = await this.prisma.match.findUnique({ where: { id: matchId }, include: MATCH_LOAD });
     if (!match) throw new ApiError(404, 'match_not_found', 'Match not found');
     requireParticipant(match, userId);
-    return buildState(match);
+    return foldMatchState(match);
   }
 
   /**
@@ -60,7 +60,7 @@ export class MatchStateService {
       const me = requireParticipant(match, userId);
       const actor: Slot = me.slot === 1 ? 1 : 0;
 
-      const current = buildState(match);
+      const current = foldMatchState(match);
       if (baseVersion !== undefined && baseVersion !== current.version) {
         throw new ApiError(
           409,
@@ -101,7 +101,7 @@ export class MatchStateService {
         throw new ApiError(409, 'nothing_to_undo', 'Nothing to undo');
       }
       // Append the undo event and re-fold (undo-aware fold cancels the last action).
-      return buildState({ ...match, events: [...match.events, { type: 'undo', payload: {} }] });
+      return foldMatchState({ ...match, events: [...match.events, { type: 'undo', payload: {} }] });
     }
 
     if (
@@ -156,7 +156,7 @@ function effectiveEvents(events: StoredEvent[]): StoredEvent[] {
 }
 
 /** Fold the event log onto the initial state; `version` counts all stored events. */
-function buildState(match: LoadedMatch): MatchLiveState {
+export function foldMatchState(match: LoadedMatch): MatchLiveState {
   const initial = initialMatchState({
     matchId: match.id,
     bestOf: match.bestOf,
