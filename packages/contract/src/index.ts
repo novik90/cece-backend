@@ -16,3 +16,4 @@ export * from './matches';
 export * from './scoring';
 export * from './friends';
 export * from './invites';
+export * from './stats';
