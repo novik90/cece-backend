@@ -190,6 +190,41 @@ describe('scoring', () => {
     expect(seen.frame!.freeBallAvailable).toBe(false);
   });
 
+  it('enters respotted-black sudden death on a tie and settles it on the next black', async () => {
+    const me = await makeUser('ivan');
+    const matchId = await makeMatch(me.token, { guestName: 'Гость' });
+    const s = await join(me.token, matchId);
+    const pot = (ball: string): Promise<Ack> => emit(s, 'score:pot', { ball });
+
+    // slot 0 builds 22, hands over; slot 1 makes 15 then ties on the black.
+    for (let i = 0; i < 15; i++) await pot('red');
+    await pot('yellow'); // free colour → colors phase, colorOn yellow
+    await pot('yellow');
+    await pot('green'); // slot 0 = 22, colorOn brown
+    await emit(s, 'score:endVisit', {}); // → striker 1
+    await pot('brown');
+    await pot('blue');
+    await pot('pink'); // slot 1 = 15, only the black left
+
+    const tie = nextState(s);
+    await pot('black'); // slot 1 +7 = 22 → tie → respotted black
+    const rb = await tie;
+    expect(rb.frame!.respottedBlack).toBe(true);
+    expect(rb.frame!.scores).toEqual([22, 22]);
+    expect(rb.frame!.colorOn).toBe('black');
+
+    // only the black is on in sudden death
+    expect(await pot('pink')).toEqual({
+      error: { code: 'invalid_action', message: expect.any(String) },
+    });
+
+    // potting the black decides the frame for the lot-chosen striker
+    const decided = nextState(s);
+    expect(await pot('black')).toHaveProperty('ok', true);
+    const settled = await decided;
+    expect(settled.framesWon[0] + settled.framesWon[1]).toBe(1);
+  });
+
   it('forbids self-scoring when the option is on; the opponent may score', async () => {
     const a = await makeUser('alice');
     const b = await makeUser('bob');

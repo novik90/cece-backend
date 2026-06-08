@@ -58,6 +58,7 @@ export const frameStateSchema = z.object({
   currentBreak: breakSchema,
   pointsRemaining: nonNegIntSchema, // points still on the table
   freeBallAvailable: z.boolean(), // striker may take a free ball (offered after a foul)
+  respottedBlack: z.boolean(), // sudden death: only the re-spotted black is on
   status: z.enum(['in_progress', 'completed']),
   winner: slotSchema.optional(), // set when the frame completes
 });
