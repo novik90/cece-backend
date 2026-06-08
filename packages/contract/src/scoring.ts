@@ -57,6 +57,7 @@ export const frameStateSchema = z.object({
   colorOn: ballSchema.optional(), // in the 'colors' phase: which colour is next
   currentBreak: breakSchema,
   pointsRemaining: nonNegIntSchema, // points still on the table
+  freeBallAvailable: z.boolean(), // striker may take a free ball (offered after a foul)
   status: z.enum(['in_progress', 'completed']),
   winner: slotSchema.optional(), // set when the frame completes
 });
@@ -98,6 +99,7 @@ export type MatchJoin = z.infer<typeof matchJoinSchema>;
 export const scoringActionSchema = z.discriminatedUnion('type', [
   potPayloadSchema.extend({ type: z.literal('pot') }),
   foulPayloadSchema.extend({ type: z.literal('foul') }),
+  noPayloadSchema.extend({ type: z.literal('freeBall') }),
   noPayloadSchema.extend({ type: z.literal('endVisit') }),
   noPayloadSchema.extend({ type: z.literal('concedeFrame') }),
   noPayloadSchema.extend({ type: z.literal('concedeMatch') }),
@@ -113,6 +115,7 @@ export const WS_CLIENT_EVENTS = {
   join: 'match:join',
   pot: 'score:pot',
   foul: 'score:foul',
+  freeBall: 'score:freeBall',
   endVisit: 'score:endVisit',
   concedeFrame: 'frame:concede',
   concedeMatch: 'match:concede',

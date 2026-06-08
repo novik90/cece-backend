@@ -5,7 +5,7 @@ import { EngineError } from './error';
  * In-frame actions handled by the core reducer. Frame/match completion,
  * concede and undo are orchestrated at the match level (separate task).
  */
-export type FrameAction = Extract<ScoringAction, { type: 'pot' | 'foul' | 'endVisit' }>;
+export type FrameAction = Extract<ScoringAction, { type: 'pot' | 'foul' | 'freeBall' | 'endVisit' }>;
 
 /** Final colour sequence after all reds are gone. */
 const COLORS_SEQUENCE: readonly Ball[] = ['yellow', 'green', 'brown', 'blue', 'pink', 'black'];
@@ -41,6 +41,7 @@ export function initialFrameState(frameNumber: number, breaker: Slot): FrameStat
     phase: 'reds',
     currentBreak: { striker: breaker, points: 0 },
     pointsRemaining: pointsRemaining('reds', REDS_AT_START),
+    freeBallAvailable: false,
     status: 'in_progress',
   };
 }
@@ -56,12 +57,42 @@ export function applyScoringAction(state: FrameState, action: FrameAction): Fram
   }
   switch (action.type) {
     case 'pot':
-      return applyPot(state, action.ball);
+      // A scoring stroke (or any non-foul) clears the free-ball offer.
+      return { ...applyPot(state, action.ball), freeBallAvailable: false };
     case 'foul':
-      return applyFoul(state, action.points);
+      // After a foul the next striker is offered a free ball (server doesn't
+      // detect snookers — it simply offers, as the iOS client does).
+      return { ...applyFoul(state, action.points), freeBallAvailable: true };
+    case 'freeBall':
+      return applyFreeBall(state);
     case 'endVisit':
-      return endVisit(state);
+      return { ...endVisit(state), freeBallAvailable: false };
   }
+}
+
+/**
+ * Free ball: the striker nominates any ball as the ball on, which acquires the
+ * value of the ball on — 1 in the reds phase, the value of `colorOn` in the
+ * colours phase. The table is otherwise unchanged (no red is removed, the colour
+ * sequence does not advance). Only allowed when offered (after a foul).
+ */
+function applyFreeBall(state: FrameState): FrameState {
+  if (!state.freeBallAvailable) {
+    throw new EngineError('free_ball_not_available', 'Free ball is not available');
+  }
+  let value: number;
+  if (state.phase === 'colors') {
+    if (!state.colorOn) throw new EngineError('invalid_action', 'No ball on for a free ball');
+    value = BALL_VALUES[state.colorOn];
+  } else {
+    value = BALL_VALUES.red; // ball on in the reds phase is a red (1)
+  }
+  return {
+    ...state,
+    scores: addPoints(state.scores, state.striker, value),
+    currentBreak: { striker: state.striker, points: state.currentBreak.points + value },
+    freeBallAvailable: false,
+  };
 }
 
 function applyPot(state: FrameState, ball: Ball): FrameState {
