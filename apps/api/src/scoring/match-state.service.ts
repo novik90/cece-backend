@@ -69,13 +69,18 @@ export class MatchStateService {
         );
       }
 
-      const next = this.computeNext(match, current, action, actor);
+      // Lot for a possible re-spotted black; persisted only if the frame entered
+      // sudden death, so the fold reproduces the same first striker.
+      const respottedBlackStriker: Slot = Math.random() < 0.5 ? 0 : 1;
+      const next = this.computeNext(match, current, action, actor, respottedBlackStriker);
+      const enteredRespottedBlack =
+        current.frame?.respottedBlack !== true && next.frame?.respottedBlack === true;
       await tx.matchEvent.create({
         data: {
           matchId,
           seq: match.events.length,
           type: action.type,
-          payload: payloadOf(action, actor),
+          payload: payloadOf(action, actor, enteredRespottedBlack ? respottedBlackStriker : undefined),
           byUserId: userId,
         },
       });
@@ -89,6 +94,7 @@ export class MatchStateService {
     current: MatchLiveState,
     action: ScoringAction,
     actor: Slot,
+    respottedBlackStriker?: Slot,
   ): MatchLiveState {
     if (action.type === 'undo') {
       if (effectiveEvents(match.events).length === 0) {
@@ -107,7 +113,7 @@ export class MatchStateService {
     }
 
     try {
-      const next = applyAction(current, action, actor);
+      const next = applyAction(current, action, actor, respottedBlackStriker);
       return { ...next, version: match.events.length + 1 };
     } catch (err) {
       if (err instanceof EngineError) throw engineToApi(err);
@@ -123,14 +129,19 @@ function requireParticipant(match: MatchWithParticipants, userId: string) {
 }
 
 /** Run one action through the engine (concede is match-level; the rest in-frame). */
-function applyAction(state: MatchLiveState, action: ScoringAction, actor: Slot): MatchLiveState {
+function applyAction(
+  state: MatchLiveState,
+  action: ScoringAction,
+  actor: Slot,
+  respottedBlackStriker?: Slot,
+): MatchLiveState {
   switch (action.type) {
     case 'concedeFrame':
       return concedeFrame(state, actor);
     case 'concedeMatch':
       return concedeMatch(state, actor);
     default:
-      return reduceMatch(state, action as FrameAction);
+      return reduceMatch(state, action as FrameAction, respottedBlackStriker);
   }
 }
 
@@ -158,16 +169,28 @@ function buildState(match: LoadedMatch): MatchLiveState {
     if (ev.type === 'concedeFrame' || ev.type === 'concedeMatch') {
       return applyAction(s, { type: ev.type }, payload.by === 1 ? 1 : 0);
     }
-    return applyAction(s, { type: ev.type, ...payload } as ScoringAction, 0);
+    const { rbStriker, ...rest } = payload;
+    const lot: Slot | undefined = rbStriker === 1 ? 1 : rbStriker === 0 ? 0 : undefined;
+    return applyAction(s, { type: ev.type, ...rest } as ScoringAction, 0, lot);
   }, initial);
   return { ...state, version: match.events.length };
 }
 
-function payloadOf(action: ScoringAction, actor: Slot): Prisma.InputJsonValue {
-  if (action.type === 'pot') return { ball: action.ball };
-  if (action.type === 'foul') return { points: action.points };
-  if (action.type === 'concedeFrame' || action.type === 'concedeMatch') return { by: actor };
-  return {};
+function payloadOf(
+  action: ScoringAction,
+  actor: Slot,
+  respottedBlackStriker?: Slot,
+): Prisma.InputJsonValue {
+  const base: Record<string, unknown> =
+    action.type === 'pot'
+      ? { ball: action.ball }
+      : action.type === 'foul'
+        ? { points: action.points }
+        : action.type === 'concedeFrame' || action.type === 'concedeMatch'
+          ? { by: actor }
+          : {};
+  if (respottedBlackStriker !== undefined) base.rbStriker = respottedBlackStriker;
+  return base as Prisma.InputJsonValue;
 }
 
 function matchRowPatch(state: MatchLiveState) {

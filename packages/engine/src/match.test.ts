@@ -119,6 +119,77 @@ describe('concede', () => {
   });
 });
 
+describe('respotted black (sudden death)', () => {
+  /** A live state parked with only the black on, given scores and striker. */
+  function onlyBlack(scores: [number, number], striker: Slot): MatchLiveState {
+    const live = reduceMatch(newMatch(3, 0), { type: 'pot', ball: 'red' });
+    return {
+      ...live,
+      frame: {
+        ...live.frame!,
+        phase: 'colors',
+        colorOn: 'black',
+        redsRemaining: 0,
+        scores,
+        striker,
+        currentBreak: { striker, points: 0 },
+        pointsRemaining: 7,
+        respottedBlack: false,
+      },
+    };
+  }
+
+  it('enters sudden death when potting the black ties the scores; the lot sets the striker', () => {
+    const s = onlyBlack([3, 10], 0); // slot 0 is 7 behind
+    const rb = reduceMatch(s, { type: 'pot', ball: 'black' }, 1); // lot → striker 1
+    expect(rb.frame?.respottedBlack).toBe(true);
+    expect(rb.frame?.colorOn).toBe('black');
+    expect(rb.frame?.scores).toEqual([10, 10]);
+    expect(rb.frame?.striker).toBe(1);
+    expect(rb.framesWon).toEqual([0, 0]); // not settled
+  });
+
+  it('enters sudden death when a foul on the last black ties the scores', () => {
+    const s = onlyBlack([10, 6], 0); // slot 0 striker, fouls 4 → slot 1 to 10
+    const rb = reduceMatch(s, { type: 'foul', points: 4 }, 0); // lot → striker 0
+    expect(rb.frame?.respottedBlack).toBe(true);
+    expect(rb.frame?.scores).toEqual([10, 10]);
+    expect(rb.frame?.striker).toBe(0);
+  });
+
+  it('does not enter sudden death when potting the black settles a lead', () => {
+    const s = onlyBlack([20, 10], 0);
+    const m = reduceMatch(s, { type: 'pot', ball: 'black' });
+    expect(m.frame?.respottedBlack).toBeFalsy();
+    expect(m.framesWon).toEqual([1, 0]); // slot 0 wins the frame
+  });
+
+  describe('actions in sudden death', () => {
+    const rb = (): MatchLiveState => reduceMatch(onlyBlack([3, 10], 0), { type: 'pot', ball: 'black' }, 1);
+
+    it('potting the black wins the frame for the striker', () => {
+      const won = reduceMatch(rb(), { type: 'pot', ball: 'black' }); // striker 1
+      expect(won.framesWon).toEqual([0, 1]);
+      expect(won.frame?.respottedBlack).toBeFalsy(); // fresh next frame
+    });
+
+    it('a foul loses the frame for the striker', () => {
+      const lost = reduceMatch(rb(), { type: 'foul', points: 4 }); // striker 1 fouls
+      expect(lost.framesWon).toEqual([1, 0]);
+    });
+
+    it('endVisit passes the turn and stays in sudden death', () => {
+      const passed = reduceMatch(rb(), { type: 'endVisit' });
+      expect(passed.frame?.respottedBlack).toBe(true);
+      expect(passed.frame?.striker).toBe(0); // switched from 1
+    });
+
+    it('rejects potting anything but the black', () => {
+      expect(() => reduceMatch(rb(), { type: 'pot', ball: 'pink' })).toThrow(EngineError);
+    });
+  });
+});
+
 describe('highestBreak', () => {
   it('tracks the running max single-visit break per slot', () => {
     let m = reduceMatch(newMatch(5, 0), { type: 'pot', ball: 'red' }); // slot 0: break 1

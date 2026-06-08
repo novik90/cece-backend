@@ -25,6 +25,7 @@ const frame = {
   currentBreak: { striker: 0, points: 0 },
   pointsRemaining: 147,
   freeBallAvailable: false,
+  respottedBlack: false,
   status: 'in_progress',
 } as const;
 

@@ -42,6 +42,7 @@ export function initialFrameState(frameNumber: number, breaker: Slot): FrameStat
     currentBreak: { striker: breaker, points: 0 },
     pointsRemaining: pointsRemaining('reds', REDS_AT_START),
     freeBallAvailable: false,
+    respottedBlack: false,
     status: 'in_progress',
   };
 }
